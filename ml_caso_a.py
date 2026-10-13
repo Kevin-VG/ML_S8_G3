@@ -1,31 +1,35 @@
-"""Parte 2 - Partición y primeros modelos del Caso A (Sesión 08).
-
-Este módulo no depende de Streamlit: se puede reutilizar al integrar SVM
-para asegurar la misma división 80/20 y el mismo preprocesamiento.
-"""
+"""Partición, preprocesamiento, entrenamiento y evaluación del Caso A."""
 from pathlib import Path
 
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score,
+    f1_score, confusion_matrix,
+)
 from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.svm import SVC
 
 COLUMNAS_NUMERICAS = [
-    "horas_estudio", "asistencia", "promedio_anterior", "tareas_entregadas"
+    "horas_estudio", "asistencia",
+    "promedio_anterior", "tareas_entregadas",
 ]
 COLUMNAS_CATEGORICAS = ["participacion", "acceso_internet"]
 VARIABLE_OBJETIVO = "aprobo"
-COLUMNAS_REQUERIDAS = COLUMNAS_NUMERICAS + COLUMNAS_CATEGORICAS + [VARIABLE_OBJETIVO]
+COLUMNAS_REQUERIDAS = (
+    COLUMNAS_NUMERICAS + COLUMNAS_CATEGORICAS + [VARIABLE_OBJETIVO]
+)
 SEMILLA = 42
 PORCENTAJE_PRUEBA = 0.20
 
 
 def cargar_datos(ruta: str | Path) -> pd.DataFrame:
-    """Carga el CSV y verifica que tenga las columnas necesarias."""
+    """Carga el CSV y verifica las columnas y la etiqueta."""
     datos = pd.read_csv(ruta)
     validar_datos(datos)
     return datos
@@ -40,24 +44,22 @@ def validar_datos(datos: pd.DataFrame) -> None:
     if set(datos[VARIABLE_OBJETIVO].unique()) != {0, 1}:
         raise ValueError("La columna aprobo debe contener las clases 0 y 1.")
     if datos[VARIABLE_OBJETIVO].value_counts().min() < 2:
-        raise ValueError("Se requieren al menos dos filas por clase para estratificar.")
+        raise ValueError("Se requieren al menos dos filas por clase.")
 
 
 def separar_datos(datos: pd.DataFrame):
-    """Reserva el 20% como test y mantiene la proporción de clases."""
+    """Reserva el 20% para prueba y conserva la proporción de clases."""
     validar_datos(datos)
     X = datos[COLUMNAS_NUMERICAS + COLUMNAS_CATEGORICAS].copy()
     y = datos[VARIABLE_OBJETIVO].copy()
     return train_test_split(
-        X, y,
-        test_size=PORCENTAJE_PRUEBA,
-        random_state=SEMILLA,
-        stratify=y,
+        X, y, test_size=PORCENTAJE_PRUEBA,
+        random_state=SEMILLA, stratify=y,
     )
 
 
 def construir_preprocesador() -> ColumnTransformer:
-    """Toda imputación y normalización se ajusta solo al entrenar el Pipeline."""
+    """Los transformadores se ajustan dentro del Pipeline con train."""
     numericas = Pipeline(steps=[
         ("imputacion", SimpleImputer(strategy="median")),
         ("escalado", StandardScaler()),
@@ -73,23 +75,49 @@ def construir_preprocesador() -> ColumnTransformer:
 
 
 def construir_modelos() -> dict[str, Pipeline]:
-    """Dos Pipelines INDEPENDIENTES, listos para fit(X_train, y_train)."""
+    """Construye tres Pipelines con preprocesadores independientes."""
+    clasificadores = {
+        "Regresión logística": LogisticRegression(
+            max_iter=1000, random_state=SEMILLA
+        ),
+        "KNN": KNeighborsClassifier(n_neighbors=5),
+        "SVM": SVC(kernel="rbf", C=1.0, gamma="scale"),
+    }
     return {
-        "Regresión logística": Pipeline(steps=[
+        nombre: Pipeline(steps=[
             ("preprocesamiento", construir_preprocesador()),
-            ("modelo", LogisticRegression(max_iter=1000, random_state=SEMILLA)),
-        ]),
-        "KNN": Pipeline(steps=[
-            ("preprocesamiento", construir_preprocesador()),
-            ("modelo", KNeighborsClassifier(n_neighbors=5)),
-        ]),
+            ("modelo", clasificador),
+        ])
+        for nombre, clasificador in clasificadores.items()
     }
 
 
 def entrenar_modelos(datos: pd.DataFrame):
-    """Entrena sin tocar X_test: se devuelve test para evaluación final posterior."""
+    """Entrena los tres modelos usando solamente el conjunto train."""
     X_train, X_test, y_train, y_test = separar_datos(datos)
     modelos = construir_modelos()
     for pipeline in modelos.values():
         pipeline.fit(X_train, y_train)
     return X_train, X_test, y_train, y_test, modelos
+
+
+def evaluar_modelos(modelos, X_test, y_test):
+    """Calcula métricas en test; riesgo (0) es la clase positiva."""
+    resultados, matrices = [], {}
+    for nombre, pipeline in modelos.items():
+        y_pred = pipeline.predict(X_test)
+        resultados.append({
+            "Modelo": nombre,
+            "Accuracy": accuracy_score(y_test, y_pred),
+            "Precision riesgo (0)": precision_score(
+                y_test, y_pred, pos_label=0, zero_division=0
+            ),
+            "Recall riesgo (0)": recall_score(
+                y_test, y_pred, pos_label=0, zero_division=0
+            ),
+            "F1 riesgo (0)": f1_score(
+                y_test, y_pred, pos_label=0, zero_division=0
+            ),
+        })
+        matrices[nombre] = confusion_matrix(y_test, y_pred, labels=[0, 1])
+    return pd.DataFrame(resultados), matrices
