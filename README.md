@@ -59,6 +59,4 @@ svm = Pipeline([
 svm.fit(X_train, y_train)
 ```
 
-El conjunto de prueba debe reservarse para **evaluación final**, no para probar repetidamente hiperparámetros. Las métricas formales y matrices de confusión corresponden a la siguiente parte del equipo.
 
-> **Importante sobre la entrega:** la guía adjunta menciona notebook `.ipynb` e informe PDF; si el docente indicó usar Streamlit en vez de Colab, confirmen si Streamlit reemplaza al notebook o se entrega adicionalmente. Este proyecto no genera `.ipynb` por sí mismo.
